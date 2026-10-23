@@ -1,0 +1,1 @@
+"""Software RAID Manager package."""
