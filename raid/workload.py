@@ -64,3 +64,44 @@ def generate_workload(
         raise ValueError(f"Unknown workload kind: {kind}. Choose 'sequential', 'random', or 'mixed'.")
 
     return requests
+
+
+def parse_trace_csv(csv_content: str, max_lbn: int) -> list[dict]:
+    """Parse a CSV trace string (header: op,lbn or op,pbn) into requests."""
+    requests = []
+    lines = csv_content.strip().splitlines()
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        parts = [p.strip() for p in line.split(",")]
+        if len(parts) < 2:
+            continue
+        op_str, lbn_str = parts[0].lower(), parts[1]
+        if op_str in ("op", "type", "operation"):
+            continue  # header
+        op = "r" if op_str in ("r", "read") else "w"
+        try:
+            raw_lbn = int(lbn_str)
+            lbn = raw_lbn % max_lbn if max_lbn > 0 else 0
+            requests.append({"op": op, "lbn": lbn})
+        except ValueError:
+            continue
+    return requests
+
+
+def get_sample_trace(name: str, max_lbn: int, n_requests: int = 40) -> list[dict]:
+    """Return a pre-configured realistic storage workload trace."""
+    norm = name.strip().upper()
+    if norm == "OLTP":
+        # OLTP: 80% random reads, 20% random writes across entire volume
+        return generate_workload("random", n_requests=n_requests, max_lbn=max_lbn, read_ratio=0.8, seed=101)
+    elif norm in ("WEB", "WEB-SERVER", "WEBSERVER"):
+        # Web-Server: 90% sequential reads with periodic write logging
+        return generate_workload("sequential", n_requests=n_requests, max_lbn=max_lbn, read_ratio=0.9, seed=202)
+    elif norm in ("BATCH", "ANALYTICS"):
+        # Mixed: 50% reads, 50% writes in sequential/random chunks
+        return generate_workload("mixed", n_requests=n_requests, max_lbn=max_lbn, read_ratio=0.5, seed=303)
+    else:
+        return generate_workload("mixed", n_requests=n_requests, max_lbn=max_lbn, read_ratio=0.7, seed=42)
+

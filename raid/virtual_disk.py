@@ -32,7 +32,35 @@ class VirtualDisk:
             "total_seek_distance": 0,
             "total_simulated_ms": 0.0,
         }
+        # SMART Telemetry
+        self.reallocated_sectors = 0
+        self.read_errors = 0
+        self.temperature = 35
+        self.health_score = 100.0
         self._lock = threading.Lock()
+
+    def record_smart_error(self, count: int = 1) -> None:
+        """Inject SMART bad sectors / read errors, lowering health score."""
+        with self._lock:
+            self.reallocated_sectors += count
+            self.read_errors += count
+            self.health_score = max(0.0, self.health_score - count * 15.0)
+
+    def is_smart_warning(self) -> bool:
+        """Return True if drive health indicates imminent failure."""
+        return self.health_score < 70.0 or self.reallocated_sectors >= 3
+
+    def smart_report(self) -> dict:
+        """Return structured SMART health report."""
+        status = "FAILED" if self.failed else ("WARNING" if self.is_smart_warning() else "OK")
+        return {
+            "disk_id": self.disk_id,
+            "status": status,
+            "health_score": round(self.health_score, 1),
+            "reallocated_sectors": self.reallocated_sectors,
+            "read_errors": self.read_errors,
+            "temperature_c": self.temperature,
+        }
 
     def access_cost(self, pbn: int) -> float:
         """Calculate simulated access cost in ms, moving the head and updating stats."""

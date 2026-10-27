@@ -26,12 +26,16 @@ class Raid5(RaidArray):
         lock_manager: StripeLockManager | None = None,
         scheduler_policy: str = "FCFS",
         artificial_delay_ms: float = 0.0,
+        chunk_size: int = 1,
     ):
         if len(disks) < 3:
             raise ValueError("RAID 5 requires at least 3 disks")
+        if chunk_size < 1:
+            raise ValueError("chunk_size must be >= 1")
         if lock_manager is None:
             lock_manager = StripeLockManager(num_stripes=disks[0].num_blocks, enabled=True)
         super().__init__(disks, spares, oplog, lock_manager, scheduler_policy)
+        self.chunk_size = chunk_size
         self.data_per_stripe = self.num_disks - 1
         self.artificial_delay_ms = artificial_delay_ms
 
@@ -44,16 +48,21 @@ class Raid5(RaidArray):
         if lbn < 0 or lbn >= self.capacity_blocks():
             raise IndexError(f"LBN {lbn} out of bounds (0..{self.capacity_blocks() - 1})")
 
-        stripe = lbn // self.data_per_stripe
-        idx = lbn % self.data_per_stripe
+        stripe_data_blocks = self.data_per_stripe * self.chunk_size
+        stripe = lbn // stripe_data_blocks
+        stripe_offset = lbn % stripe_data_blocks
+        chunk_idx = stripe_offset // self.chunk_size
+        chunk_offset = stripe_offset % self.chunk_size
+
         parity_disk_idx = (self.num_disks - 1) - (stripe % self.num_disks)
         data_disk_indices = [d for d in range(self.num_disks) if d != parity_disk_idx]
-        data_disk_idx = data_disk_indices[idx]
+        data_disk_idx = data_disk_indices[chunk_idx]
+        pbn = stripe * self.chunk_size + chunk_offset
 
         return {
             "lbn": lbn,
             "stripe": stripe,
-            "pbn": stripe,
+            "pbn": pbn,
             "disk": data_disk_idx,
             "parity_disk": parity_disk_idx,
             "role": "data",
@@ -65,12 +74,13 @@ class Raid5(RaidArray):
         mapping = self.map_lbn(lbn)
         data_disk_idx = mapping["disk"]
         stripe = mapping["stripe"]
+        pbn = mapping["pbn"]
         target_disk = self.disks[data_disk_idx]
 
         # Normal read path
         if not target_disk.failed and not target_disk.needs_rebuild:
-            data = target_disk.read(stripe)
-            self.oplog.add(f"RAID5 Read LBN {lbn} from Disk {target_disk.disk_id} (stripe {stripe})", level="info")
+            data = target_disk.read(pbn)
+            self.oplog.add(f"RAID5 Read LBN {lbn} from Disk {target_disk.disk_id} (PBN {pbn})", level="info")
             return data
 
         # Degraded read path: target disk is failed or rebuilding
@@ -87,7 +97,7 @@ class Raid5(RaidArray):
         reconstructed = bytes(self.block_size)
         for i, disk in enumerate(self.disks):
             if i != data_disk_idx:
-                block_data = disk.read(stripe)
+                block_data = disk.read(pbn)
                 reconstructed = xor_bytes(reconstructed, block_data)
 
         return reconstructed
@@ -98,6 +108,7 @@ class Raid5(RaidArray):
         data_disk_idx = mapping["disk"]
         parity_disk_idx = mapping["parity_disk"]
         stripe = mapping["stripe"]
+        pbn = mapping["pbn"]
         data_disk_indices = mapping["data_disks"]
 
         data_disk = self.disks[data_disk_idx]
@@ -111,8 +122,8 @@ class Raid5(RaidArray):
 
             # Case A: Normal path (both data disk and parity disk healthy)
             if not data_disk.failed and not parity_disk.failed:
-                old_data = data_disk.read(stripe)
-                old_parity = parity_disk.read(stripe)
+                old_data = data_disk.read(pbn)
+                old_parity = parity_disk.read(pbn)
 
                 if self.artificial_delay_ms > 0:
                     time.sleep(self.artificial_delay_ms / 1000.0)
@@ -120,11 +131,11 @@ class Raid5(RaidArray):
                 # new_parity = old_parity XOR old_data XOR new_data
                 new_parity = xor_bytes(old_parity, xor_bytes(old_data, data))
 
-                data_disk.write(stripe, data)
-                parity_disk.write(stripe, new_parity)
+                data_disk.write(pbn, data)
+                parity_disk.write(pbn, new_parity)
 
                 self.oplog.add(
-                    f"RAID5 RMW write LBN {lbn}: Data->Disk {data_disk.disk_id}, Parity->Disk {parity_disk.disk_id}",
+                    f"RAID5 RMW write LBN {lbn}: Data->Disk {data_disk.disk_id} PBN {pbn}, Parity->Disk {parity_disk.disk_id} PBN {pbn}",
                     level="info",
                 )
 
@@ -134,10 +145,10 @@ class Raid5(RaidArray):
                 new_parity = bytes(data).ljust(self.block_size, b'\x00')[:self.block_size]
                 for other_idx in data_disk_indices:
                     if other_idx != data_disk_idx:
-                        other_data = self.disks[other_idx].read(stripe)
+                        other_data = self.disks[other_idx].read(pbn)
                         new_parity = xor_bytes(new_parity, other_data)
 
-                parity_disk.write(stripe, new_parity)
+                parity_disk.write(pbn, new_parity)
                 self.oplog.add(
                     f"RAID5 Degraded write LBN {lbn}: Data disk failed, updated parity on Disk {parity_disk.disk_id}",
                     level="warning",
@@ -145,13 +156,13 @@ class Raid5(RaidArray):
 
             # Case C: Parity disk failed, data disk healthy (degraded write)
             elif not data_disk.failed and parity_disk.failed:
-                data_disk.write(stripe, data)
+                data_disk.write(pbn, data)
                 self.oplog.add(
                     f"RAID5 Degraded write LBN {lbn}: Parity disk failed, wrote data to Disk {data_disk.disk_id}",
                     level="warning",
                 )
 
-    def rebuild(self, disk_id: int, progress_cb=None) -> bool:
+    def rebuild(self, disk_id: int, progress_cb=None, rate_limit_delay_ms: float = 0.0) -> bool:
         """Rebuild target disk by XORing all surviving blocks in each stripe."""
         target_idx = None
         for i, d in enumerate(self.disks):
@@ -171,18 +182,20 @@ class Raid5(RaidArray):
             self.oplog.add(f"RAID5 Rebuild failed: multiple disks unavailable", level="error")
             return False
 
-        self.oplog.add(f"RAID5 Rebuilding Disk {disk_id} across {self.disk_blocks} stripes...", level="info")
+        self.oplog.add(f"RAID5 Rebuilding Disk {disk_id} across {self.disk_blocks} blocks...", level="info")
 
-        for stripe in range(self.disk_blocks):
+        for pbn in range(self.disk_blocks):
+            if rate_limit_delay_ms > 0:
+                time.sleep(rate_limit_delay_ms / 1000.0)
             reconstructed = bytes(self.block_size)
             for i, disk in enumerate(self.disks):
                 if i != target_idx:
-                    block_data = disk.read(stripe)
+                    block_data = disk.read(pbn)
                     reconstructed = xor_bytes(reconstructed, block_data)
 
-            target_disk.write(stripe, reconstructed)
+            target_disk.write(pbn, reconstructed)
             if progress_cb:
-                progress_cb(stripe + 1, self.disk_blocks)
+                progress_cb(pbn + 1, self.disk_blocks)
 
         target_disk.needs_rebuild = False
         self.oplog.add(f"RAID5 Rebuild for Disk {disk_id} completed successfully.", level="info")
@@ -201,7 +214,8 @@ class Raid5(RaidArray):
         grid = []
         for d_idx, disk in enumerate(self.disks):
             disk_blocks = []
-            for stripe in range(self.disk_blocks):
+            for pbn in range(self.disk_blocks):
+                stripe = pbn // self.chunk_size
                 parity_disk_idx = (self.num_disks - 1) - (stripe % self.num_disks)
                 data_disk_indices = [d for d in range(self.num_disks) if d != parity_disk_idx]
 
@@ -210,8 +224,9 @@ class Raid5(RaidArray):
                     lbn = None
                 else:
                     kind = "data"
-                    sub_idx = data_disk_indices.index(d_idx)
-                    lbn = stripe * self.data_per_stripe + sub_idx
+                    chunk_idx = data_disk_indices.index(d_idx)
+                    chunk_offset = pbn % self.chunk_size
+                    lbn = (stripe * self.data_per_stripe + chunk_idx) * self.chunk_size + chunk_offset
 
                 if disk.failed:
                     state = "failed"
@@ -225,7 +240,7 @@ class Raid5(RaidArray):
                     "state": state,
                     "lbn": lbn,
                     "stripe": stripe,
-                    "pbn": stripe,
+                    "pbn": pbn,
                 })
             grid.append(disk_blocks)
         return grid

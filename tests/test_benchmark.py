@@ -21,7 +21,8 @@ def test_benchmark_run_and_plots():
     assert set(df_perf["level"]) == {"RAID 0", "RAID 1", "RAID 5"}
     assert set(df_perf["workload"]) == {"sequential", "random", "mixed"}
 
-    assert len(df_sched) == 2  # FCFS and SCAN
+    assert len(df_sched) == 4  # FCFS, SCAN, C-SCAN, LOOK
+    assert set(df_sched["policy"]) == {"FCFS", "SCAN", "C-SCAN", "LOOK"}
     scan_row = df_sched[df_sched["policy"] == "SCAN"].iloc[0]
     fcfs_row = df_sched[df_sched["policy"] == "FCFS"].iloc[0]
     assert scan_row["total_head_movement"] <= fcfs_row["total_head_movement"]

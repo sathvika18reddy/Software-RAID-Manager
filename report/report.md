@@ -179,3 +179,12 @@ Key verification milestones:
 1. **Simulated Time vs Wall-Clock Time:** Latencies are simulated via math formulas ($0.5\,\text{ms}$ seek + $2.0\,\text{ms}$ rotation) to allow fast deterministic benchmarking. Real physical micro-benchmarking with disk spin-up would require OS-level direct I/O.
 2. **RAID 6 & Double Parity:** The current implementation supports single-disk parity (RAID 5). Extending to dual-disk failure tolerance (RAID 6) would require Galois Field $GF(2^8)$ Reed-Solomon arithmetic.
 3. **Journaling & WAL:** Implementing a non-volatile write-ahead log (WAL) for intent logging could permanently eliminate the write-hole syndrome without requiring periodic full-array scrubbing.
+
+## 8. Live Demo Screenshots
+
+- **RAID 5 rotating parity:** [Array View](./screenshots/array_view_raid5_rotating_parity.png)
+- **Degraded read recovery:** [Parity reconstruction](./screenshots/failure_recovery_degraded_read.png)
+- **Hot spare rebuild:** [Rebuild operation log](./screenshots/failure_recovery_hot_spare_rebuild.png)
+- **Concurrency race without locks:** [Unsafe writes](./screenshots/concurrency_race_locks_disabled.png)
+- **Concurrency with stripe locks:** [Consistent writes](./screenshots/concurrency_locks_enabled.png)
+- **Write-hole repair:** [Scrub and repair operation log](./screenshots/write_hole_parity_repair.png)

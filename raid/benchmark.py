@@ -98,12 +98,12 @@ def run_full_benchmark(
 
     df_perf = pd.DataFrame(records)
 
-    # Scheduler benchmark (FCFS vs SCAN on identical batch)
+    # Scheduler benchmark (FCFS, SCAN, C-SCAN, LOOK on identical batch)
     sched_records = []
     rng = np.random.default_rng(seed)
     pbn_batch = rng.integers(0, num_blocks, size=n_requests).tolist()
 
-    for policy in ["FCFS", "SCAN"]:
+    for policy in ["FCFS", "SCAN", "C-SCAN", "LOOK"]:
         disk = VirtualDisk(disk_id=0, num_blocks=num_blocks, block_size=BLOCK_SIZE)
         q = DiskQueue(disk=disk, policy=policy)
         for pbn in pbn_batch:
@@ -206,18 +206,19 @@ def plot_latency(df_perf: pd.DataFrame) -> plt.Figure:
 
 
 def plot_scheduler_movement(df_sched: pd.DataFrame) -> plt.Figure:
-    """Plot total head movement for FCFS vs SCAN."""
-    fig, ax = plt.subplots(figsize=(6, 4))
-    colors = ["#e53e3e", "#38a169"]
-    bars = ax.bar(df_sched["policy"], df_sched["total_head_movement"], color=colors, width=0.5)
-    ax.set_title("Disk Scheduler: Total Head Movement", fontsize=12, fontweight="bold", pad=10)
+    """Plot total head movement for FCFS vs SCAN vs C-SCAN vs LOOK."""
+    fig, ax = plt.subplots(figsize=(6.5, 4))
+    palette = {"FCFS": "#e53e3e", "SCAN": "#38a169", "C-SCAN": "#3182ce", "LOOK": "#dd6b20"}
+    colors = [palette.get(p, "#4a5568") for p in df_sched["policy"]]
+    bars = ax.bar(df_sched["policy"], df_sched["total_head_movement"], color=colors, width=0.5, edgecolor="black")
+    ax.set_title("Disk Schedulers: Head Movement Comparison", fontsize=12, fontweight="bold", pad=10)
     ax.set_xlabel("Scheduling Policy", fontsize=11)
     ax.set_ylabel("Total Head Movement (Blocks)", fontsize=11)
     ax.grid(axis="y", linestyle="--", alpha=0.6)
 
     for bar in bars:
         yval = bar.get_height()
-        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 5, f"{int(yval)} blks", ha="center", va="bottom", fontweight="bold")
+        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 2, f"{int(yval)} blks", ha="center", va="bottom", fontweight="bold", fontsize=9)
 
     plt.tight_layout()
     return fig

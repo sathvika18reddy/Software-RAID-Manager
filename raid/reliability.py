@@ -38,7 +38,11 @@ def tolerance(level: str, num_disks: int) -> int:
         return max(0, num_disks - 1)
     elif lvl == "RAID5":
         return 1
-    raise ValueError(f"Unknown RAID level: '{level}'. Supported levels: 'RAID0', 'RAID1', 'RAID5'.")
+    elif lvl in ("RAID10", "RAID1+0", "RAID01"):
+        return 1  # 1 disk guaranteed; up to N/2 if in different pairs
+    elif lvl == "RAID6":
+        return 2
+    raise ValueError(f"Unknown RAID level: '{level}'. Supported levels: 'RAID0', 'RAID1', 'RAID5', 'RAID6', 'RAID10'.")
 
 
 def simulate_trial(params: ReliabilityParams, rng: np.random.Generator) -> tuple[bool, float | None]:

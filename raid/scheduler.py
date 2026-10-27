@@ -6,11 +6,12 @@ from raid.virtual_disk import VirtualDisk
 
 
 class DiskQueue:
-    """Manages an I/O request queue for a VirtualDisk with FCFS and SCAN scheduling."""
+    """Manages an I/O request queue for a VirtualDisk with FCFS, SCAN, C-SCAN, and LOOK scheduling."""
 
     def __init__(self, disk: VirtualDisk, policy: str = "FCFS"):
-        if policy not in ("FCFS", "SCAN"):
-            raise ValueError(f"Unknown scheduling policy: {policy}")
+        valid_policies = ("FCFS", "SCAN", "C-SCAN", "LOOK")
+        if policy not in valid_policies:
+            raise ValueError(f"Unknown scheduling policy: {policy}. Supported: {valid_policies}")
         self.disk = disk
         self.policy = policy
         self._queue: list[tuple[dict, Future]] = []
@@ -31,12 +32,18 @@ class DiskQueue:
         if not items or self.policy == "FCFS":
             return list(items)
 
-        if self.policy == "SCAN":
-            current_head = self.disk.head_position
-            # Partition requests: those >= current head and those < current head
-            up = [item for item in items if item[0]["pbn"] >= current_head]
-            down = [item for item in items if item[0]["pbn"] < current_head]
+        current_head = self.disk.head_position
+        up = [item for item in items if item[0]["pbn"] >= current_head]
+        down = [item for item in items if item[0]["pbn"] < current_head]
 
+        if self.policy == "C-SCAN":
+            # Circular sweep: sweep UP in ascending order, then wrap to lowest requested PBN
+            # and sweep UP again in ascending order to provide uniform waiting times.
+            up.sort(key=lambda item: item[0]["pbn"])
+            down.sort(key=lambda item: item[0]["pbn"])
+            return up + down
+
+        if self.policy in ("SCAN", "LOOK"):
             # Upward sweep: increasing PBN
             up.sort(key=lambda item: item[0]["pbn"])
             # Downward sweep: decreasing PBN

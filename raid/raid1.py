@@ -75,8 +75,10 @@ class Raid1(RaidArray):
             level="info",
         )
 
-    def rebuild(self, disk_id: int, progress_cb=None) -> bool:
+    def rebuild(self, disk_id: int, progress_cb=None, rate_limit_delay_ms: float = 0.0) -> bool:
         """Rebuild replaced disk by copying all blocks from any healthy mirror disk."""
+        import time
+
         target_disk = None
         for d in self.disks:
             if d.disk_id == disk_id:
@@ -96,6 +98,8 @@ class Raid1(RaidArray):
         self.oplog.add(f"RAID1 starting rebuild of Disk {disk_id} from source Disk {source_disk.disk_id}", level="info")
 
         for pbn in range(self.disk_blocks):
+            if rate_limit_delay_ms > 0:
+                time.sleep(rate_limit_delay_ms / 1000.0)
             block_data = source_disk.read(pbn)
             target_disk.write(pbn, block_data)
             if progress_cb:

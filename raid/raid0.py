@@ -15,27 +15,34 @@ class Raid0(RaidArray):
         oplog: OperationLog | None = None,
         lock_manager=None,
         scheduler_policy: str = "FCFS",
+        chunk_size: int = 1,
     ):
         if len(disks) < 2:
             raise ValueError("RAID 0 requires at least 2 disks")
+        if chunk_size < 1:
+            raise ValueError("chunk_size must be >= 1")
         super().__init__(disks, spares, oplog, lock_manager, scheduler_policy)
+        self.chunk_size = chunk_size
 
     def capacity_blocks(self) -> int:
         """Usable capacity is N * disk_blocks."""
         return self.num_disks * self.disk_blocks
 
     def map_lbn(self, lbn: int) -> dict:
-        """Map logical block number (LBN) to physical disk and PBN."""
+        """Map logical block number (LBN) to physical disk, PBN, and stripe."""
         if lbn < 0 or lbn >= self.capacity_blocks():
             raise IndexError(f"LBN {lbn} out of bounds (0..{self.capacity_blocks() - 1})")
-        disk_idx = lbn % self.num_disks
-        pbn = lbn // self.num_disks
+        stripe_capacity = self.num_disks * self.chunk_size
+        stripe = lbn // stripe_capacity
+        stripe_offset = lbn % stripe_capacity
+        disk_idx = stripe_offset // self.chunk_size
+        pbn = stripe * self.chunk_size + (stripe_offset % self.chunk_size)
         return {
             "lbn": lbn,
             "disk": disk_idx,
             "pbn": pbn,
             "role": "data",
-            "stripe": pbn,
+            "stripe": stripe,
         }
 
     def read_block(self, lbn: int) -> bytes:
@@ -80,7 +87,9 @@ class Raid0(RaidArray):
         for d_idx, disk in enumerate(self.disks):
             disk_blocks = []
             for pbn in range(self.disk_blocks):
-                lbn = pbn * self.num_disks + d_idx
+                stripe = pbn // self.chunk_size
+                offset_in_chunk = pbn % self.chunk_size
+                lbn = (stripe * self.num_disks + d_idx) * self.chunk_size + offset_in_chunk
                 if disk.failed:
                     state = "failed"
                 elif disk.needs_rebuild:
@@ -91,7 +100,8 @@ class Raid0(RaidArray):
                     "kind": "data",
                     "state": state,
                     "lbn": lbn,
-                    "stripe": pbn,
+                    "stripe": stripe,
+                    "pbn": pbn,
                 })
             grid.append(disk_blocks)
         return grid

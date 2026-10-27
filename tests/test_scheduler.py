@@ -66,3 +66,60 @@ def test_scan_head_movement_less_or_equal_fcfs():
     assert queue_scan.total_head_movement <= queue_fcfs.total_head_movement
     # Typically SCAN provides a massive reduction in head movement
     assert queue_scan.total_head_movement < queue_fcfs.total_head_movement
+
+
+def test_cscan_order_circular_sweep():
+    """C-SCAN sweeps up to highest request then wraps to lowest request and sweeps up again."""
+    disk = VirtualDisk(disk_id=4, num_blocks=64, block_size=BLOCK_SIZE)
+    disk.head_position = 20
+
+    queue = DiskQueue(disk=disk, policy="C-SCAN")
+    requests = [10, 40, 5, 30, 50, 15]
+    for pbn in requests:
+        queue.submit({"op": "r", "pbn": pbn})
+
+    served = queue.process_all()
+    served_pbns = [s["pbn"] for s in served]
+
+    # Starting at 20 sweeping UP: [30, 40, 50], then circular wrap UP from bottom: [5, 10, 15]
+    assert served_pbns == [30, 40, 50, 5, 10, 15]
+
+
+def test_look_order_monotonic_per_sweep():
+    """LOOK sweeps in active direction then reverses at extreme request."""
+    disk = VirtualDisk(disk_id=5, num_blocks=64, block_size=BLOCK_SIZE)
+    disk.head_position = 20
+
+    queue = DiskQueue(disk=disk, policy="LOOK")
+    requests = [10, 40, 5, 30, 50, 15]
+    for pbn in requests:
+        queue.submit({"op": "r", "pbn": pbn})
+
+    served = queue.process_all()
+    served_pbns = [s["pbn"] for s in served]
+
+    # Starting at 20 sweeping UP: [30, 40, 50], then reversing DOWN: [15, 10, 5]
+    assert served_pbns == [30, 40, 50, 15, 10, 5]
+
+
+def test_compare_all_four_schedulers():
+    """Verify all four schedulers process a batch correctly and optimize head movement."""
+    random.seed(42)
+    num_blocks = 100
+    requests = [random.randint(0, num_blocks - 1) for _ in range(30)]
+
+    results = {}
+    for policy in ("FCFS", "SCAN", "C-SCAN", "LOOK"):
+        disk = VirtualDisk(disk_id=10, num_blocks=num_blocks, block_size=BLOCK_SIZE)
+        disk.head_position = 0
+        queue = DiskQueue(disk=disk, policy=policy)
+        for pbn in requests:
+            queue.submit({"op": "r", "pbn": pbn})
+        served = queue.process_all()
+        assert len(served) == len(requests)
+        results[policy] = queue.total_head_movement
+
+    # SCAN and LOOK should produce significantly less head movement than FCFS
+    assert results["SCAN"] < results["FCFS"]
+    assert results["LOOK"] < results["FCFS"]
+

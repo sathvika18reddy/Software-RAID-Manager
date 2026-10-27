@@ -1,10 +1,16 @@
 """Unit tests for scrubbing, write-hole crash simulation, silent corruption, and repair."""
 
 import pytest
-from raid.virtual_disk import VirtualDisk
+from raid.virtual_disk import VirtualDisk, DiskFailedError
 from raid.raid5 import Raid5, xor_bytes
 from raid.raid1 import Raid1
-from raid.scrub import scrub, write_with_crash, SimulatedCrashError, checksum_array
+from raid.scrub import (
+    scrub,
+    write_with_crash,
+    SimulatedCrashError,
+    ScrubUnavailableError,
+    checksum_array,
+)
 from raid.config import BLOCK_SIZE
 
 
@@ -97,6 +103,34 @@ def test_write_hole_repaired_by_scrub_prevents_corruption():
     # Degraded read of LBN 1 should successfully recover the true data!
     recovered_lbn1 = raid.read_block(1)
     assert recovered_lbn1.startswith(b"Initial B")
+
+
+def test_scrub_refuses_degraded_array():
+    """Scrub must not raise DiskFailedError; degraded arrays are unavailable for parity audit."""
+    disks = [VirtualDisk(i, num_blocks=8, block_size=BLOCK_SIZE) for i in range(4)]
+    raid = Raid5(disks=disks)
+
+    for lbn in range(6):
+        raid.write_block(lbn, f"Block-{lbn}".encode())
+
+    disks[1].fail()
+
+    with pytest.raises(ScrubUnavailableError, match="degraded") as exc_info:
+        scrub(raid, repair=False)
+
+    assert not isinstance(exc_info.value, DiskFailedError)
+
+
+def test_scrub_refuses_rebuilding_array():
+    """Scrub must also refuse when a disk is replaced but needs rebuild."""
+    disks = [VirtualDisk(i, num_blocks=8, block_size=BLOCK_SIZE) for i in range(4)]
+    raid = Raid5(disks=disks)
+    raid.write_block(0, b"data")
+    disks[1].fail()
+    raid.replace_disk(1)
+    assert disks[1].needs_rebuild
+    with pytest.raises(ScrubUnavailableError, match="Scrub needs all disks online"):
+        scrub(raid, repair=False)
 
 
 def test_raid1_scrub_and_repair():

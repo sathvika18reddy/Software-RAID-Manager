@@ -22,9 +22,10 @@ def test_tolerance_values():
     assert tolerance("RAID1", 2) == 1
     assert tolerance("RAID 1", 3) == 2
     assert tolerance("RAID5", 4) == 1
-    assert tolerance("RAID 5", 8) == 1
+    assert tolerance("RAID6", 4) == 2
+    assert tolerance("RAID10", 4) == 1
     with pytest.raises(ValueError):
-        tolerance("RAID6", 4)
+        tolerance("RAID99", 4)
 
 
 def test_determinism():
