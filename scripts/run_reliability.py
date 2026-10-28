@@ -47,24 +47,24 @@ def run_experiments(
     print(f"==================================================================\n")
 
     # -------------------------------------------------------------------------
-    # Experiment 1: Compare Architectures (RAID 0, RAID 1, RAID 5)
+    # Experiment 1: Compare Architectures (RAID 0, 1, 5, 6, 10)
     # -------------------------------------------------------------------------
-    print("[1/4] Running Experiment 1: Level Comparison (RAID 0, 1, 5)...")
-    levels = ["RAID 0", "RAID 1", "RAID 5"]
+    print("[1/4] Running Experiment 1: Level Comparison (RAID 0, 1, 5, 6, 10)...")
+    levels = ["RAID 0", "RAID 1", "RAID 5", "RAID 6", "RAID 10"]
     df_exp1 = compare_levels(base_params, levels)
     csv1 = os.path.join(out_dir, "exp1_level_comparison.csv")
     df_exp1.to_csv(csv1, index=False)
 
-    fig1, ax1 = plt.subplots(figsize=(7, 4.5))
+    fig1, ax1 = plt.subplots(figsize=(8, 4.5))
     yerr = [df_exp1["p_loss"] - df_exp1["ci_low"], df_exp1["ci_high"] - df_exp1["p_loss"]]
     bars = ax1.bar(
         df_exp1["level"],
         df_exp1["p_loss"],
         yerr=yerr,
         capsize=5,
-        color=["#e53e3e", "#319795", "#dd6b20"],
+        color=["#e53e3e", "#319795", "#dd6b20", "#805ad5", "#0ea5e9"],
         edgecolor="black",
-        width=0.5,
+        width=0.55,
     )
     ax1.set_title("Probability of Data Loss by RAID Level (5-Year Mission)", fontsize=12, fontweight="bold")
     ax1.set_xlabel("Architecture", fontsize=11)
@@ -174,10 +174,17 @@ def run_experiments(
     years = list(range(1, 11))
     exp4_records = []
 
+    arch_configs = [
+        ("RAID 0", "#e53e3e", "o", 4),
+        ("RAID 1", "#319795", "^", 2),
+        ("RAID 5", "#dd6b20", "s", 4),
+        ("RAID 6", "#805ad5", "D", 4),
+        ("RAID 10", "#0ea5e9", "v", 4),
+    ]
+
     for yr in years:
         hrs = yr * 8760.0
-        for lvl in ["RAID 0", "RAID 1", "RAID 5"]:
-            n_d = 2 if lvl == "RAID 1" else 4
+        for lvl, color, marker, n_d in arch_configs:
             p = ReliabilityParams(
                 level=lvl,
                 num_disks=n_d,
@@ -194,8 +201,8 @@ def run_experiments(
     csv4 = os.path.join(out_dir, "exp4_mission_time_sweep.csv")
     df_exp4.to_csv(csv4, index=False)
 
-    fig4, ax4 = plt.subplots(figsize=(8, 4.5))
-    for lvl, color, marker in [("RAID 0", "#e53e3e", "o"), ("RAID 1", "#319795", "^"), ("RAID 5", "#dd6b20", "s")]:
+    fig4, ax4 = plt.subplots(figsize=(8.5, 4.5))
+    for lvl, color, marker, _ in arch_configs:
         sub = df_exp4[df_exp4["level"] == lvl]
         ax4.plot(sub["year"], sub["p_loss"], marker=marker, label=lvl, color=color, linewidth=2)
 

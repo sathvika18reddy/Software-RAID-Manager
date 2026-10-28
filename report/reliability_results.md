@@ -14,6 +14,8 @@ To evaluate the comparative reliability and resilience of storage arrays over ex
    - **RAID 0 (Tolerates 0):** Data loss on the very first disk failure ($N \ge 2$).
    - **RAID 1 (Tolerates $N - 1$):** Data loss only if all $N$ mirror disks are concurrently failed.
    - **RAID 5 (Tolerates 1):** Data loss if 2 or more disks are concurrently down.
+   - **RAID 6 (Tolerates 2):** Data loss only if 3 or more disks are concurrently down (dual $GF(2^8)$ parity).
+   - **RAID 10 (Tolerates 1 to $N/2$):** Data loss only if both disks in the same mirrored pair fail.
 
 ---
 
@@ -28,6 +30,8 @@ Parameters: $\text{MTTF} = 100,000\,\text{hours}$ (~11.4 years), $\text{Rebuild}
 | **RAID 0** | 4 | 0 disks | **$82.08\%$** ($0.8208$) | $[81.55\%, 82.61\%]$ | $16,416$ |
 | **RAID 1** | 2 | 1 disk | **$0.03\%$** ($0.0003$) | $[0.006\%, 0.054\%]$ | $6$ |
 | **RAID 5** | 4 | 1 disk | **$0.18\%$** ($0.0018$) | $[0.117\%, 0.233\%]$ | $35$ |
+| **RAID 6** | 4 | 2 disks | **$<0.001\%$** ($0.0000$) | $[0.000\%, 0.000\%]$ | $0$ |
+| **RAID 10** | 4 | 1..2 disks | **$0.06\%$** ($0.0006$) | $[0.026\%, 0.094\%]$ | $12$ |
 
 *Chart Reference:* `results/exp1_level_comparison.png`
 
