@@ -17,8 +17,8 @@ def test_workload_generator():
 def test_benchmark_run_and_plots():
     df_perf, df_sched, df_penalty, df_comp = run_full_benchmark(n_requests=20, num_blocks=16, seed=123)
 
-    assert len(df_perf) == 9  # 3 levels * 3 workloads
-    assert set(df_perf["level"]) == {"RAID 0", "RAID 1", "RAID 5"}
+    assert len(df_perf) == 15  # 5 levels * 3 workloads
+    assert set(df_perf["level"]) == {"RAID 0", "RAID 1", "RAID 5", "RAID 6", "RAID 10"}
     assert set(df_perf["workload"]) == {"sequential", "random", "mixed"}
 
     assert len(df_sched) == 4  # FCFS, SCAN, C-SCAN, LOOK
@@ -27,8 +27,8 @@ def test_benchmark_run_and_plots():
     fcfs_row = df_sched[df_sched["policy"] == "FCFS"].iloc[0]
     assert scan_row["total_head_movement"] <= fcfs_row["total_head_movement"]
 
-    assert len(df_penalty) == 3
-    assert len(df_comp) == 3
+    assert len(df_penalty) == 5
+    assert len(df_comp) == 5
 
     # Ensure plot functions produce Figures without throwing
     fig1 = plot_throughput(df_perf)

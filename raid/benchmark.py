@@ -12,6 +12,10 @@ from raid.workload import generate_workload
 from raid.config import BLOCK_SIZE
 
 
+from raid.raid6 import Raid6
+from raid.raid10 import Raid10
+
+
 def run_benchmark_for_array(array, requests: list[dict]) -> dict:
     """Execute requests on a RAID array and compute simulated performance metrics."""
     # Reset disk stats
@@ -75,15 +79,15 @@ def run_full_benchmark(
     records = []
 
     for w_name in workloads:
-        # RAID 0 (3 disks)
-        d0 = [VirtualDisk(i, num_blocks=num_blocks, block_size=BLOCK_SIZE) for i in range(3)]
+        # RAID 0 (4 disks)
+        d0 = [VirtualDisk(i, num_blocks=num_blocks, block_size=BLOCK_SIZE) for i in range(4)]
         r0 = Raid0(d0)
         reqs0 = generate_workload(w_name, n_requests, max_lbn=r0.capacity_blocks(), seed=seed)
         m0 = run_benchmark_for_array(r0, reqs0)
         records.append({"level": "RAID 0", "workload": w_name, **m0})
 
-        # RAID 1 (3 disks)
-        d1 = [VirtualDisk(i, num_blocks=num_blocks, block_size=BLOCK_SIZE) for i in range(3)]
+        # RAID 1 (4 disks)
+        d1 = [VirtualDisk(i, num_blocks=num_blocks, block_size=BLOCK_SIZE) for i in range(4)]
         r1 = Raid1(d1)
         reqs1 = generate_workload(w_name, n_requests, max_lbn=r1.capacity_blocks(), seed=seed)
         m1 = run_benchmark_for_array(r1, reqs1)
@@ -95,6 +99,20 @@ def run_full_benchmark(
         reqs5 = generate_workload(w_name, n_requests, max_lbn=r5.capacity_blocks(), seed=seed)
         m5 = run_benchmark_for_array(r5, reqs5)
         records.append({"level": "RAID 5", "workload": w_name, **m5})
+
+        # RAID 6 (4 disks)
+        d6 = [VirtualDisk(i, num_blocks=num_blocks, block_size=BLOCK_SIZE) for i in range(4)]
+        r6 = Raid6(d6)
+        reqs6 = generate_workload(w_name, n_requests, max_lbn=r6.capacity_blocks(), seed=seed)
+        m6 = run_benchmark_for_array(r6, reqs6)
+        records.append({"level": "RAID 6", "workload": w_name, **m6})
+
+        # RAID 10 (4 disks)
+        d10 = [VirtualDisk(i, num_blocks=num_blocks, block_size=BLOCK_SIZE) for i in range(4)]
+        r10 = Raid10(d10)
+        reqs10 = generate_workload(w_name, n_requests, max_lbn=r10.capacity_blocks(), seed=seed)
+        m10 = run_benchmark_for_array(r10, reqs10)
+        records.append({"level": "RAID 10", "workload": w_name, **m10})
 
     df_perf = pd.DataFrame(records)
 
@@ -120,14 +138,18 @@ def run_full_benchmark(
     # Small-write penalty table
     df_penalty = pd.DataFrame([
         {"Level": "RAID 0", "Logical Read (Disk Reads)": 1, "Logical Write (Disk Writes)": "1", "Disk Reads on Write": 0, "Disk Writes on Write": 1, "Total IOs per Write": 1},
-        {"Level": "RAID 1", "Logical Read (Disk Reads)": 1, "Logical Write (Disk Writes)": "N (mirrors)", "Disk Reads on Write": 0, "Disk Writes on Write": 3, "Total IOs per Write": 3},
+        {"Level": "RAID 1", "Logical Read (Disk Reads)": 1, "Logical Write (Disk Writes)": "N (mirrors)", "Disk Reads on Write": 0, "Disk Writes on Write": 4, "Total IOs per Write": 4},
         {"Level": "RAID 5", "Logical Read (Disk Reads)": 1, "Logical Write (Disk Writes)": "2R + 2W (RMW)", "Disk Reads on Write": 2, "Disk Writes on Write": 2, "Total IOs per Write": 4},
+        {"Level": "RAID 6", "Logical Read (Disk Reads)": 1, "Logical Write (Disk Writes)": "3R + 3W (P+Q RMW)", "Disk Reads on Write": 3, "Disk Writes on Write": 3, "Total IOs per Write": 6},
+        {"Level": "RAID 10", "Logical Read (Disk Reads)": 1, "Logical Write (Disk Writes)": "2W (mirrored pair)", "Disk Reads on Write": 0, "Disk Writes on Write": 2, "Total IOs per Write": 2},
     ])
 
     # Comparison summary table (with measured throughput from random workload)
     rand_r0 = df_perf[(df_perf["level"] == "RAID 0") & (df_perf["workload"] == "random")].iloc[0]
     rand_r1 = df_perf[(df_perf["level"] == "RAID 1") & (df_perf["workload"] == "random")].iloc[0]
     rand_r5 = df_perf[(df_perf["level"] == "RAID 5") & (df_perf["workload"] == "random")].iloc[0]
+    rand_r6 = df_perf[(df_perf["level"] == "RAID 6") & (df_perf["workload"] == "random")].iloc[0]
+    rand_r10 = df_perf[(df_perf["level"] == "RAID 10") & (df_perf["workload"] == "random")].iloc[0]
 
     df_comp = pd.DataFrame([
         {
@@ -160,6 +182,26 @@ def run_full_benchmark(
             "Measured Throughput (req/s)": f"{rand_r5['throughput_req_per_sec']:.1f}",
             "Storage Efficiency": f"{rand_r5['storage_efficiency']*100:.1f}%",
         },
+        {
+            "Level": "RAID 6",
+            "Min disks": 4,
+            "Usable capacity": "N - 2",
+            "Fault tolerance": "any 2 disks",
+            "Read perf": "high",
+            "Write perf": "double penalty (3R + 3W)",
+            "Measured Throughput (req/s)": f"{rand_r6['throughput_req_per_sec']:.1f}",
+            "Storage Efficiency": f"{rand_r6['storage_efficiency']*100:.1f}%",
+        },
+        {
+            "Level": "RAID 10",
+            "Min disks": "4 (even)",
+            "Usable capacity": "N / 2 (50%)",
+            "Fault tolerance": "up to N/2 (1 per pair)",
+            "Read perf": "very high",
+            "Write perf": "high (2 writes)",
+            "Measured Throughput (req/s)": f"{rand_r10['throughput_req_per_sec']:.1f}",
+            "Storage Efficiency": f"{rand_r10['storage_efficiency']*100:.1f}%",
+        },
     ])
 
     return df_perf, df_sched, df_penalty, df_comp
@@ -169,9 +211,11 @@ def run_full_benchmark(
 
 def plot_throughput(df_perf: pd.DataFrame) -> plt.Figure:
     """Plot Throughput per RAID level per workload."""
-    fig, ax = plt.subplots(figsize=(8, 4.5))
+    fig, ax = plt.subplots(figsize=(8.5, 4.5))
     pivot = df_perf.pivot(index="workload", columns="level", values="throughput_req_per_sec")
-    pivot.plot(kind="bar", ax=ax, width=0.7, colormap="viridis")
+    level_order = ["RAID 0", "RAID 1", "RAID 5", "RAID 6", "RAID 10"]
+    pivot = pivot[[c for c in level_order if c in pivot.columns]]
+    pivot.plot(kind="bar", ax=ax, width=0.75, colormap="viridis")
     ax.set_title("Throughput per RAID Level and Workload", fontsize=13, fontweight="bold", pad=10)
     ax.set_xlabel("Workload Pattern", fontsize=11)
     ax.set_ylabel("Throughput (Requests / Simulated Sec)", fontsize=11)
@@ -183,18 +227,21 @@ def plot_throughput(df_perf: pd.DataFrame) -> plt.Figure:
 
 def plot_latency(df_perf: pd.DataFrame) -> plt.Figure:
     """Plot Average and P95 Latency per RAID level per workload."""
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
     pivot_avg = df_perf.pivot(index="workload", columns="level", values="avg_latency_ms")
     pivot_p95 = df_perf.pivot(index="workload", columns="level", values="p95_latency_ms")
+    level_order = ["RAID 0", "RAID 1", "RAID 5", "RAID 6", "RAID 10"]
+    pivot_avg = pivot_avg[[c for c in level_order if c in pivot_avg.columns]]
+    pivot_p95 = pivot_p95[[c for c in level_order if c in pivot_p95.columns]]
 
-    pivot_avg.plot(kind="bar", ax=ax1, width=0.7, colormap="tab10")
+    pivot_avg.plot(kind="bar", ax=ax1, width=0.75, colormap="tab10")
     ax1.set_title("Average Latency (ms)", fontsize=12, fontweight="bold")
     ax1.set_xlabel("Workload")
     ax1.set_ylabel("Simulated ms")
     ax1.grid(axis="y", linestyle="--", alpha=0.6)
     ax1.tick_params(axis="x", rotation=0)
 
-    pivot_p95.plot(kind="bar", ax=ax2, width=0.7, colormap="tab10")
+    pivot_p95.plot(kind="bar", ax=ax2, width=0.75, colormap="tab10")
     ax2.set_title("P95 Latency (ms)", fontsize=12, fontweight="bold")
     ax2.set_xlabel("Workload")
     ax2.set_ylabel("Simulated ms")

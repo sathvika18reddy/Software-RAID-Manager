@@ -1028,7 +1028,7 @@ with tabs[5]:
     st.subheader("📊 Performance Benchmarks & Storage Trade-offs")
 
     if st.button("🚀 Run Full Benchmark Suite", type="primary") or st.session_state.bench_cache is None:
-        with st.spinner("Executing sequential, random, and mixed workloads across RAID 0, 1, 5..."):
+        with st.spinner("Executing sequential, random, and mixed workloads across RAID 0, 1, 5, 6, 10..."):
             st.session_state.bench_cache = run_full_benchmark(n_requests=60, num_blocks=24, seed=42)
 
     df_perf, df_sched, df_penalty, df_comp = st.session_state.bench_cache
